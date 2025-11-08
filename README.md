@@ -7,6 +7,18 @@
 
 **Repository**: [github.com/ProfArcanex01/achilles](https://github.com/ProfArcanex01/achilles)
 
+## Screenshots
+
+### Investigation Workflow
+![Achilles Investigation Process](screenshots/process.png)
+
+*The complete investigation workflow from planning to reporting*
+
+### Sample Analysis Report
+![Sample Analysis Report](screenshots/sample report.png)
+
+*Example of comprehensive threat intelligence output with threat scoring and recommendations*
+
 ## Key Features
 
 ### 🧠 **AI-Powered Investigation Planning**
