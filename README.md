@@ -619,11 +619,7 @@ Contributions are welcome! Please ensure:
 - Documentation is updated
 - No sensitive data is committed (see `.gitignore`)
 
-## License
 
-This project is part of "The Complete Agentic AI Engineering Course".
-
----
 
 **Last Updated**: November 2025
 
