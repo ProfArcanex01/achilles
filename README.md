@@ -318,33 +318,72 @@ forensics_evidence/
 ## Output Structure
 
 ### Analysis Report Format
+
+Real-world example from an actual investigation:
+
 ```json
 {
-  "timestamp": "2025-09-22T22:07:47.123456",
+  "timestamp": "2025-11-02T06:21:55.830229",
+  "analysis_type": "deeper_analysis",
+  "memory_dump_path": "/sandbox/memdump.mem",
+  "os_hint": "windows",
+  "user_prompt": "Investigate potential malware infection incident",
   "analysis_results": {
     "suspicious_findings": [
       {
         "finding_type": "process",
-        "description": "Suspicious memory activity in explorer.exe",
-        "severity": "high", 
-        "evidence": "Malfind output showing suspicious memory region",
+        "description": "lsass.exe accessing PASSWD.LOG in Windows debug directory, indicating potential credential dumping.",
+        "severity": "high",
+        "evidence": "lsass.exe accessing \\Device\\HarddiskVolume1\\Windows\\debug\\PASSWD.LOG",
+        "score": 8.5
+      },
+      {
+        "finding_type": "network",
+        "description": "Established TCP connection from Firefox to external IP, indicating potential data exfiltration or C2 communication.",
+        "severity": "high",
+        "evidence": "TCP connection from Firefox to 192.168.43.218:3303",
+        "score": 8.0
+      },
+      {
+        "finding_type": "process",
+        "description": "Multiple cmd.exe processes spawned by firefox.exe, indicating potential command execution or script running.",
+        "severity": "high",
+        "evidence": "Process tree shows cmd.exe (PIDs 4088, 4980) spawned by firefox.exe (PID 2792)",
+        "score": 8.0
+      },
+      {
+        "finding_type": "persistence",
+        "description": "WFS.exe in System32 with corrupted path characters, indicating potential masquerading or tampering.",
+        "severity": "high",
+        "evidence": "Path: \\Windows\\System32\\WFS.exe with corrupted Unicode characters",
         "score": 8.0
       }
     ],
-    "threat_score": 7.0,
+    "executive_summary": "Combined analysis of 30 chunks identified 104 findings across processes, network, persistence, and memory categories. High-severity threats include credential dumping attempts, suspicious network connections, and process manipulation.",
+    "threat_score": 6.78,
+    "analysis_confidence": 0.845,
     "key_indicators": [
-      "Code injection in explorer.exe",
-      "Unusual registry modifications"
+      "lsass.exe accessing PASSWD.LOG",
+      "Established TCP connection to external IP from Firefox",
+      "Multiple cmd.exe processes spawned by firefox.exe",
+      "WFS.exe with corrupted path",
+      "Persistence mechanisms in svchost.exe",
+      "Potential process injection or manipulation",
+      "Unusual registry and file access by explorer.exe",
+      "Multiple svchost.exe instances with unusual DLLs"
     ],
     "recommended_actions": [
-      "Isolate affected system",
-      "Analyze injected code"
-    ],
-    "executive_summary": "Investigation revealed high-risk compromise...",
-    "analysis_confidence": 0.85,
-    "analysis_method": "chunked_analysis",
-    "total_chunks_analyzed": 5
-  }
+      "Isolate the affected system from the network to prevent potential lateral movement",
+      "Investigate the lsass.exe process for credential dumping activity",
+      "Review network activity associated with Firefox for data exfiltration",
+      "Examine command line history and actions performed by cmd.exe processes",
+      "Conduct detailed analysis of svchost.exe processes to identify injected code",
+      "Review system logs and network traffic for signs of lateral movement",
+      "Perform full malware scan using updated antivirus definitions",
+      "Monitor network traffic for unusual patterns or C2 communications"
+    ]
+  },
+  "investigation_stage": "analysis_completed"
 }
 ```
 
