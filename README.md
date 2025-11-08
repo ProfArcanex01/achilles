@@ -28,17 +28,22 @@
 - **Parallel chunk processing** with progress tracking
 
 ### 📊 **Professional Reporting**
-- Structured threat intelligence output
+- Structured threat intelligence output (JSON format)
 - Executive summaries for management
 - Actionable recommendations
 - Confidence scoring and threat assessment
+- Comprehensive investigation reports saved to `analysis_results/` directory
+- Execution summaries with command statistics
+- Detailed analysis metadata for audit trails
 
 ## Architecture
 
 ### Workflow Pipeline
 ```
-START → planner → validate_plan → evaluator → execution → triage → END
+START → planner → validate_plan → evaluator → execution → triage → [deeper_analysis] → reporting → END
 ```
+
+**Note**: The `deeper_analysis` step is conditionally triggered when the threat score exceeds the threshold (default: 7.0/10). Reporting generates comprehensive JSON reports and summaries for all analysis results.
 
 ### Core Components
 
@@ -47,6 +52,8 @@ START → planner → validate_plan → evaluator → execution → triage → E
 3. **Evaluator Node**: Volatility command verification
 4. **Execution Node**: Professional evidence collection
 5. **Triage Node**: AI-powered threat analysis with chunking
+6. **Deeper Analysis Node**: Advanced targeted investigation for high-threat findings
+7. **Reporting Node**: Generates comprehensive JSON reports, summaries, and investigation documentation
 
 ## Chunked Analysis System
 
@@ -248,6 +255,53 @@ The system uses intelligent splitting:
 - Preserves line boundaries
 - Maintains logical sections (headers, data blocks)
 - Balances chunk sizes for optimal processing
+
+## Reporting
+
+Achilles generates comprehensive reports at multiple stages of the investigation:
+
+### Report Types
+
+1. **Execution Summary** (`logs/execution_summary_*.json`)
+   - Command execution statistics
+   - Success/failure rates
+   - Execution timing
+   - Evidence directory locations
+
+2. **Triage Analysis Report** (`analysis_results/chunked_analysis_metadata_*.json`)
+   - Threat score and confidence
+   - Suspicious findings
+   - Key indicators
+   - Recommended actions
+   - Executive summary
+
+3. **Deeper Analysis Report** (`deeper_analysis/analysis_results/deeper_analysis_*.json`)
+   - Enhanced threat analysis
+   - Correlated findings
+   - Detailed investigation results
+   - Advanced threat indicators
+
+4. **Investigation Summary** (Console output)
+   - Validation status
+   - Execution statistics
+   - Evidence directory paths
+   - Overall investigation status
+
+### Report Locations
+
+All reports are saved in the evidence directory structure:
+```
+forensics_evidence/
+└── Challenge_YYYYMMDD_HHMMSS/
+    ├── logs/
+    │   └── execution_summary_*.json
+    ├── analysis_results/
+    │   ├── chunked_analysis_metadata_*.json
+    │   └── deeper_analysis_*.json
+    └── deeper_analysis/
+        └── analysis_results/
+            └── deeper_analysis_*.json
+```
 
 ## Output Structure
 
