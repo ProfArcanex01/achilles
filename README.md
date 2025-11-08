@@ -1,8 +1,11 @@
-# Memory Forensics Agent with AI-Powered Analysis
+# Achilles
 
-## Overview
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-The Memory Forensics Agent is an advanced, production-ready LangGraph-based system that automates memory forensics investigations using Volatility 3. It combines intelligent planning, robust execution, and AI-powered threat analysis with chunked processing capabilities to handle large-scale forensics evidence.
+**Achilles** is an advanced, production-ready memory forensics agent powered by AI. It automates memory forensics investigations using Volatility 3, combining intelligent planning, robust execution, and AI-powered threat analysis with chunked processing capabilities to handle large-scale forensics evidence.
+
+**Repository**: [github.com/ProfArcanex01/achilles](https://github.com/ProfArcanex01/achilles)
 
 ## Key Features
 
@@ -75,30 +78,87 @@ forensics_evidence/
     └── [other evidence directories]
 ```
 
+## Installation
+
+### Prerequisites
+
+- Python 3.12 or higher
+- Volatility 3 installed and configured
+- OpenAI API key (set as environment variable `OPENAI_API_KEY`)
+
+### Setup
+
+1. **Clone the repository:**
+```bash
+git clone git@github.com:ProfArcanex01/achilles.git
+cd achilles
+```
+
+2. **Install dependencies:**
+```bash
+# Using uv (recommended)
+uv sync
+
+# Or using pip
+pip install -e .
+```
+
+3. **Set up environment variables:**
+```bash
+# Create a .env file
+echo "OPENAI_API_KEY=your_api_key_here" > .env
+```
+
 ## Usage
 
 ### Basic Investigation
 
+#### Option 1: Using the convenience function (Recommended)
+
 ```python
 import asyncio
-from pra_vol_test import MemoryForensicsAgent
+from forensics_agent import run_investigation
 
 async def investigate_memory_dump():
-    agent = MemoryForensicsAgent()
-    await agent.setup_llm()
-    
-    state = {
-        "memory_dump_path": "/path/to/memory.raw",
-        "os_hint": "windows",
-        "user_prompt": "Ransomware incident - identify attack vector"
-    }
-    
-    result = await agent.graph.ainvoke(state)
+    result = await run_investigation(
+        memory_dump_path="/path/to/memory.raw",
+        os_hint="windows",
+        user_prompt="Ransomware incident - identify attack vector"
+    )
     return result
 
 # Run investigation
 result = asyncio.run(investigate_memory_dump())
 ```
+
+#### Option 2: Using the agent class directly
+
+```python
+import asyncio
+from forensics_agent import MemoryForensicsAgent
+
+async def investigate_memory_dump():
+    agent = MemoryForensicsAgent()
+    await agent.setup_llm()
+    
+    result = await agent.investigate(
+        memory_dump_path="/path/to/memory.raw",
+        os_hint="windows",
+        user_prompt="Ransomware incident - identify attack vector"
+    )
+    return result
+
+# Run investigation
+result = asyncio.run(investigate_memory_dump())
+```
+
+#### Option 3: Using the command-line entry point
+
+```bash
+python run_forensics.py
+```
+
+Or modify `forensics_agent.py`'s `main()` function with your test cases.
 
 ### Resumable Chunked Analysis
 
@@ -106,10 +166,18 @@ If an analysis is interrupted, simply re-run with the same parameters:
 
 ```python
 # First run - processes chunks 1-5, then fails
-result1 = await agent.graph.ainvoke(state)
+result1 = await run_investigation(
+    memory_dump_path="/path/to/memory.raw",
+    os_hint="windows",
+    user_prompt="Investigate malware"
+)
 
 # Resume run - automatically detects existing chunks 1-5, continues from chunk 6
-result2 = await agent.graph.ainvoke(state)
+result2 = await run_investigation(
+    memory_dump_path="/path/to/memory.raw",
+    os_hint="windows",
+    user_prompt="Investigate malware"
+)
 ```
 
 The system will automatically:
@@ -120,27 +188,66 @@ The system will automatically:
 
 ## Configuration
 
-### Token Limits
-```python
-# In _perform_chunked_analysis method
-max_chunk_tokens = 25000  # Conservative limit per chunk
+### Environment Variables
+
+Achilles uses environment variables for configuration. Create a `.env` file or export these variables:
+
+```bash
+# Required
+OPENAI_API_KEY=your_openai_api_key
+
+# Optional - Configuration overrides
+FORENSICS_MAX_CHUNK_TOKENS=20000
+FORENSICS_MAX_RETRIES=5
+FORENSICS_RATE_LIMIT_DELAY=1.0
+FORENSICS_MAX_RATE_LIMIT_DELAY=60.0
+FORENSICS_LLM_TIMEOUT=120
+FORENSICS_LLM_TEMPERATURE=0.0
+FORENSICS_LLM_MAX_TOKENS=4000
+FORENSICS_PLANNER_MODEL=gpt-4o
+FORENSICS_EVALUATOR_MODEL=gpt-4o-mini
+FORENSICS_ANALYZER_MODEL=gpt-4o
+FORENSICS_FALLBACK_ANALYZER_MODEL=gpt-4o-mini
+FORENSICS_THREAT_THRESHOLD=7.0
+FORENSICS_CONFIDENCE_THRESHOLD=0.8
+FORENSICS_EVIDENCE_DIR=./forensics_evidence
 ```
+
+### Programmatic Configuration
+
+You can also configure Achilles programmatically:
+
+```python
+from forensics_agent import MemoryForensicsAgent
+from config import ForensicsConfig
+
+# Create custom configuration
+config = ForensicsConfig(
+    max_chunk_tokens=20000,
+    planner_model="gpt-4o",
+    analyzer_model="gpt-4o",
+    threat_score_threshold=7.0
+)
+
+# Use custom config with Achilles
+agent = MemoryForensicsAgent(config)
+await agent.setup_llm()
+```
+
+### Default Configuration
+
+- **Max Chunk Tokens**: 20,000 (conservative limit per chunk)
+- **Planner Model**: gpt-4o
+- **Evaluator Model**: gpt-4o-mini
+- **Analyzer Model**: gpt-4o
+- **Threat Score Threshold**: 7.0 (triggers deeper analysis)
+- **Confidence Threshold**: 0.8
 
 ### Chunk Strategy
 The system uses intelligent splitting:
 - Preserves line boundaries
 - Maintains logical sections (headers, data blocks)
 - Balances chunk sizes for optimal processing
-
-### LLM Configuration
-```python
-# Analysis LLM setup
-self.analysis_llm_with_output = ChatOpenAI(
-    model="gpt-4o",
-    temperature=0.1,
-    max_tokens=2000
-).with_structured_output(AnalysisOutput, method="function_calling")
-```
 
 ## Output Structure
 
@@ -310,11 +417,17 @@ unique_indicators = list(set(all_indicators))
 
 **Missing Dependencies**
 - Ensure `volatility_executor.py` is available
-- Install required packages: `tiktoken`, `langchain-openai`
+- Install required packages: `uv sync` or `pip install -e .`
+- Verify Volatility 3 is installed and accessible
 
 **Chunk Loading Failures**
 - Check filesystem permissions
 - Verify evidence directory structure
+- Ensure `.env` file exists with `OPENAI_API_KEY` set
+
+**Authentication Errors**
+- Verify `OPENAI_API_KEY` is set in environment or `.env` file
+- Check API key has sufficient credits/quota
 
 ### Debug Information
 
@@ -327,12 +440,28 @@ Enable verbose logging to troubleshoot:
 
 ## Dependencies
 
+The project uses `uv` for dependency management. Key dependencies include:
+
+- **langchain-openai** - OpenAI integration for LLM operations
+- **langgraph** - Workflow graph orchestration
+- **python-dotenv** - Environment variable management
+- **pydantic** - Data validation and schemas
+- **tiktoken** - Token counting for chunking (used via langchain)
+
+### Installing Dependencies
+
 ```bash
-pip install langchain-openai
-pip install tiktoken
-pip install pydantic
-pip install jsonschema
+# Using uv (recommended - faster and more reliable)
+uv sync
+
+# Or using pip
+pip install -e .
+
+# Or install specific dependencies
+pip install langchain-openai langgraph python-dotenv pydantic
 ```
+
+See `pyproject.toml` for the complete dependency list.
 
 ## Future Enhancements
 
@@ -341,15 +470,57 @@ pip install jsonschema
 3. **Incremental Updates**: Update analysis as new evidence arrives
 4. **Cross-Investigation Correlation**: Link findings across cases
 
+## Project Structure
+
+```
+achilles/
+├── config/              # Configuration management
+│   └── settings.py      # ForensicsConfig class
+├── models/              # Data models and schemas
+│   ├── schemas.py       # Pydantic models
+│   └── state.py         # ForensicState TypedDict
+├── nodes/               # Workflow nodes
+│   ├── planner.py       # Investigation planning
+│   ├── evaluator.py     # Command evaluation
+│   └── execution.py     # Evidence collection
+├── engines/              # Analysis engines
+│   └── deeper_analysis.py  # Advanced analysis
+├── utils/               # Utility functions
+│   ├── tokens.py        # Token counting
+│   ├── validation.py    # Schema validation
+│   └── messages.py     # Message formatting
+├── forensics_agent.py   # Main agent class
+├── forensics_tools.py   # Volatility tool definitions
+├── volatility_executor.py  # Volatility command execution
+├── run_forensics.py     # CLI entry point
+├── pyproject.toml       # Dependencies
+└── README.md           # This file
+```
+
 ## Support
 
-For issues or questions about the Memory Forensics Agent:
-1. Check chunk metadata files for debugging information
-2. Review individual chunk content for analysis accuracy
-3. Examine execution logs for detailed workflow information
-4. Verify Volatility command compatibility and execution
+For issues or questions about Achilles:
+
+1. **Check logs**: Review execution logs in `forensics_evidence/*/logs/`
+2. **Debug chunks**: Inspect chunk files in `forensics_evidence/*/analysis_chunks/`
+3. **Verify setup**: Ensure Volatility 3 and dependencies are installed
+4. **Review configuration**: Check `.env` file and environment variables
+
+## Contributing
+
+Contributions are welcome! Please ensure:
+- Code follows existing patterns
+- Tests pass (if applicable)
+- Documentation is updated
+- No sensitive data is committed (see `.gitignore`)
+
+## License
+
+This project is part of "The Complete Agentic AI Engineering Course".
 
 ---
 
-This documentation covers the complete Memory Forensics Agent system with emphasis on the advanced chunked analysis capabilities that enable processing of large-scale forensics evidence while maintaining resumability and comprehensive threat intelligence reporting.
+**Last Updated**: November 2025
+
+This documentation covers the complete Achilles system with emphasis on the advanced chunked analysis capabilities that enable processing of large-scale forensics evidence while maintaining resumability and comprehensive threat intelligence reporting.
 
