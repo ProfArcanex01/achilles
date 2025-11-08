@@ -962,9 +962,9 @@ async def main():
     test_cases = [
         {
             "name": "Windows Ransomware Investigation",
-            "memory_dump_path":"/sandbox/memdump.mem", 
+            "memory_dump_path":"/Users/arcane/Documents/Programming_Projects/The_Complete_Agentic_AI_Engineering_Course/agents/achilles/sandbox/cridex.vmem", 
             "os_hint": "windows",
-            "user_prompt": "Investigate potential malware infection incident - identify attack vector and persistence mechanisms and write a detailed analysis of the findings with evidence"
+            "user_prompt": "Investigate potential malware infection incident - identify attack vector and persistence mechanisms,iocs, and write a detailed analysis of the findings with evidence"
         }
     ]
     
