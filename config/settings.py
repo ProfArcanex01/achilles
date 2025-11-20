@@ -35,6 +35,10 @@ class ForensicsConfig:
     # Evidence storage
     evidence_base_dir: Union[str, Path] = str(Path(__file__).parent.parent / "forensics_evidence")
     
+    # Execution settings
+    shell_path: Optional[str] = None  # Shell for command execution (None = system default /bin/sh)
+    volatility_timeout: int = 600  # Timeout for volatility commands in seconds
+    
     # Thresholds for deeper analysis
     threat_score_threshold: float = 7.0
     confidence_threshold: float = 0.8
@@ -55,6 +59,8 @@ class ForensicsConfig:
             analyzer_model=os.getenv('FORENSICS_ANALYZER_MODEL', 'gpt-4o'),
             fallback_analyzer_model=os.getenv('FORENSICS_FALLBACK_ANALYZER_MODEL', 'gpt-4o-mini'),
             evidence_base_dir=os.getenv('FORENSICS_EVIDENCE_DIR', str(Path(__file__).parent.parent / "forensics_evidence")),
+            shell_path=os.getenv('FORENSICS_SHELL_PATH'),  # e.g., '/bin/zsh', '/bin/bash'
+            volatility_timeout=int(os.getenv('FORENSICS_VOLATILITY_TIMEOUT', 600)),
             threat_score_threshold=float(os.getenv('FORENSICS_THREAT_THRESHOLD', 7.0)),
             confidence_threshold=float(os.getenv('FORENSICS_CONFIDENCE_THRESHOLD', 0.8))
         )

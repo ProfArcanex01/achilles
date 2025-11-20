@@ -227,6 +227,8 @@ FORENSICS_PLANNER_MODEL=gpt-4o
 FORENSICS_EVALUATOR_MODEL=gpt-4o-mini
 FORENSICS_ANALYZER_MODEL=gpt-4o
 FORENSICS_FALLBACK_ANALYZER_MODEL=gpt-4o-mini
+FORENSICS_SHELL_PATH=/bin/zsh              # Shell for volatility commands (default: /bin/sh)
+FORENSICS_VOLATILITY_TIMEOUT=600           # Timeout for volatility commands in seconds
 FORENSICS_THREAT_THRESHOLD=7.0
 FORENSICS_CONFIDENCE_THRESHOLD=0.8
 FORENSICS_EVIDENCE_DIR=./forensics_evidence
@@ -245,6 +247,8 @@ config = ForensicsConfig(
     max_chunk_tokens=20000,
     planner_model="gpt-4o",
     analyzer_model="gpt-4o",
+    shell_path="/bin/zsh",  # Use zsh instead of default /bin/sh
+    volatility_timeout=600,
     threat_score_threshold=7.0
 )
 

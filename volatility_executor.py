@@ -44,16 +44,18 @@ class CommandResult:
 class VolatilityExecutor:
     """Enhanced Volatility command executor with context awareness."""
     
-    def __init__(self, base_output_dir: str = "./forensics_output", timeout: int = 600):
+    def __init__(self, base_output_dir: str = "./forensics_output", timeout: int = 600, shell_path: Optional[str] = None):
         """
         Initialize the executor.
         
         Args:
             base_output_dir: Base directory for storing command outputs
             timeout: Default timeout for commands in seconds (10 minutes)
+            shell_path: Shell to use for command execution (None = system default /bin/sh)
         """
         self.base_output_dir = Path(base_output_dir)
         self.timeout = timeout
+        self.shell_path = shell_path
         self.execution_log = []
         
         # Create output directory structure
@@ -119,6 +121,7 @@ class VolatilityExecutor:
             result = subprocess.run(
                 sanitized_command,
                 shell=True,
+                executable=self.shell_path,  # None falls back to /bin/sh
                 capture_output=True,
                 text=True,
                 timeout=self.timeout
@@ -250,7 +253,7 @@ class VolatilityExecutor:
                     command=cmd,
                     context=step_context,
                     save_output=True,
-                    category=self._get_category_from_phase(phase_name)
+                    category=self._get_category_from_phase(phase_name),
                 )
                 step_results.append(result)
             
@@ -446,7 +449,7 @@ class VolatilityExecutor:
 
 
 # Convenience function for simple usage
-def execute_volatility_command(command: str, output_dir: str = "./forensics_output") -> CommandResult:
+def execute_volatility_command(command: str, output_dir: str = "./forensics_output", shell_path: Optional[str] = None) -> CommandResult:
     """
     Simple function to execute a single Volatility command.
     
@@ -457,7 +460,7 @@ def execute_volatility_command(command: str, output_dir: str = "./forensics_outp
     Returns:
         CommandResult with execution details
     """
-    executor = VolatilityExecutor(base_output_dir=output_dir)
+    executor = VolatilityExecutor(base_output_dir=output_dir, shell_path=shell_path)
     return executor.execute_volatility_command(command)
 
 

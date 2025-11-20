@@ -51,7 +51,7 @@ def execution_node(state: ForensicState) -> Dict[str, Any]:
         case_id = memory_dump_path.split("/")[-1].replace(".raw", "").replace(".mem", "")
         evidence_dir = f"{ForensicsConfig.evidence_base_dir}/{case_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        executor = VolatilityExecutor(base_output_dir=evidence_dir)
+        executor = VolatilityExecutor(base_output_dir=evidence_dir, shell_path=ForensicsConfig.from_env().shell_path)
         
         # Prepare execution context
         base_context = {
