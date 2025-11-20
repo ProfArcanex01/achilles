@@ -85,6 +85,9 @@ class MemoryForensicsAgent:
         
         await self.build_graph()
         
+
+        
+        
     async def build_graph(self):
         """Build the investigation workflow graph."""
         graph_builder = StateGraph(ForensicState)
