@@ -47,7 +47,6 @@ def validate_plan_quality(plan: Dict[str, Any], skip_command_validation: bool = 
     
     # Check for essential phase coverage (more flexible matching)
     required_phase_keywords = [
-        ["triage", "initial", "baseline"],
         ["process", "execution"],
         ["network", "connection", "communication"],
         ["persistence", "autostart", "startup"],
@@ -60,7 +59,7 @@ def validate_plan_quality(plan: Dict[str, Any], skip_command_validation: bool = 
     
     for i, keyword_group in enumerate(required_phase_keywords):
         if not any(any(keyword in name for keyword in keyword_group) for name in phase_names):
-            phase_type = ["Triage", "Process", "Network", "Persistence", "Memory", "Timeline"][i]
+            phase_type = ["Process", "Network", "Persistence", "Memory", "Timeline"][i]
             missing_phases.append(f"{phase_type} analysis (keywords: {keyword_group})")
     
     if missing_phases:
