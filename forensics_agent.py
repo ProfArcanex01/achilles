@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from models import ForensicState, EvaluatorOutput, AnalysisOutput
 from config import ForensicsConfig
 from nodes import (
+    detect_os_node,
     planner_node, validate_investigation_plan,
     evaluator_node, route_based_on_evaluation,
     execution_node, route_after_execution
@@ -93,6 +94,7 @@ class MemoryForensicsAgent:
         graph_builder = StateGraph(ForensicState)
         
         # Register nodes with LLM binding
+        graph_builder.add_node("detect_os", detect_os_node)  # New: OS detection
         graph_builder.add_node("planner", self._planner_wrapper)
         graph_builder.add_node("validate_plan", validate_investigation_plan)
         graph_builder.add_node("evaluator", self._evaluator_wrapper)
@@ -100,8 +102,9 @@ class MemoryForensicsAgent:
         graph_builder.add_node("triage", self._triage_wrapper)
         graph_builder.add_node("deeper_analysis", self._deeper_analysis_wrapper)
         
-        # Define the flow: START → planner → validate_plan → evaluator → execution → triage → deeper_analysis → END
-        graph_builder.add_edge(START, "planner")
+        # Define the flow: START → detect_os → planner → validate_plan → evaluator → execution → triage → deeper_analysis → END
+        graph_builder.add_edge(START, "detect_os")  # New: Start with OS detection
+        graph_builder.add_edge("detect_os", "planner")  # New: OS detection before planning
         graph_builder.add_edge("planner", "validate_plan")
         graph_builder.add_edge("validate_plan", "evaluator")
         
@@ -130,7 +133,7 @@ class MemoryForensicsAgent:
         graph_builder.add_edge("deeper_analysis", END)
         
         # Set entry point
-        graph_builder.set_entry_point("planner")
+        graph_builder.set_entry_point("detect_os")  # New: Start with detection
         self.graph = graph_builder.compile()
         
     def _planner_wrapper(self, state: ForensicState) -> Dict[str, Any]:
@@ -480,7 +483,11 @@ class MemoryForensicsAgent:
     
     def _combine_chunk_results(self, chunk_results: List[Dict[str, Any]], 
                               state: ForensicState, evidence_directory: str) -> Dict[str, Any]:
-        """Combine results from multiple chunks into a single analysis."""
+        """
+        Combine results from multiple chunks into a single analysis.
+        
+        Uses MAX for threat score (worst-case wins) and AVERAGE for confidence.
+        """
         if not chunk_results:
             return {"analysis_results": None, "threat_score": 0.0}
         
@@ -502,19 +509,34 @@ class MemoryForensicsAgent:
             confidence_scores.append(result.get("analysis_confidence", 0.0))
         
         # Calculate overall scores
-        avg_threat_score = sum(threat_scores) / len(threat_scores) if threat_scores else 0.0
+        # Use MAX for threat score (worst-case wins in security analysis)
+        max_threat_score = max(threat_scores) if threat_scores else 0.0
+        max_threat_idx = threat_scores.index(max_threat_score) if threat_scores else -1
+        
+        # Use AVERAGE for confidence (represents overall certainty)
         avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0
+        
+        # Log threat score details
+        if max_threat_idx >= 0:
+            print(f"   📊 Threat Score Range: {min(threat_scores):.1f} - {max_threat_score:.1f} (using MAX from chunk {max_threat_idx + 1})")
         
         # Remove duplicates
         unique_indicators = list(set(all_indicators))
         unique_actions = list(set(all_actions))
         
+        # Build comprehensive executive summary
+        executive_summary = (
+            f"Combined analysis of {len(chunk_results)} chunks identified {len(all_findings)} findings. "
+            f"Maximum threat score: {max_threat_score:.1f}/10 across all chunks. "
+            f"Analysis confidence: {avg_confidence:.0%}."
+        )
+        
         return {
             "analysis_results": {
                 "suspicious_findings": all_findings,
-                "executive_summary": f"Combined analysis of {len(chunk_results)} chunks identified {len(all_findings)} findings"
+                "executive_summary": executive_summary
             },
-            "threat_score": avg_threat_score,
+            "threat_score": max_threat_score,  # Changed from avg to max
             "key_indicators": unique_indicators,
             "recommended_actions": unique_actions,
             "analysis_confidence": avg_confidence
@@ -768,7 +790,15 @@ class MemoryForensicsAgent:
     
     def _save_single_analysis_result(self, analysis_result: Dict[str, Any], 
                                    evidence_directory: str, state: ForensicState):
-        """Save single analysis result to file."""
+        """
+        Save analysis result to a JSON file with metadata.
+        Works for both triage and deeper analysis results.
+        
+        Args:
+            analysis_result: Complete analysis result dictionary
+            evidence_directory: Directory to save the results in
+            state: Current forensic state for context
+        """
         import json
         import os
         from datetime import datetime
@@ -778,12 +808,35 @@ class MemoryForensicsAgent:
             analysis_dir = os.path.join(evidence_directory, "analysis_results")
             os.makedirs(analysis_dir, exist_ok=True)
             
-            # Save analysis result
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            result_file = os.path.join(analysis_dir, f"triage_analysis_{timestamp}.json")
+            # Determine analysis type based on evidence directory path
+            if "deeper" in evidence_directory.lower():
+                analysis_type = "deeper_analysis"
+                filename_prefix = "deeper_analysis"
+            else:
+                analysis_type = "triage_analysis"
+                filename_prefix = "triage_analysis"
+            
+            # Prepare result data with metadata
+            result_data = {
+                "timestamp": datetime.now().isoformat(),
+                "analysis_type": analysis_type,
+                "memory_dump_path": state.get('memory_dump_path', 'Unknown'),
+                "os_hint": state.get('os_hint', 'Unknown'),
+                "user_prompt": state.get('user_prompt', 'General malware analysis'),
+                "analysis_results": analysis_result.get("analysis_results"),
+                "threat_score": analysis_result.get("threat_score"),
+                "analysis_confidence": analysis_result.get("analysis_confidence"),
+                "key_indicators": analysis_result.get("key_indicators"),
+                "recommended_actions": analysis_result.get("recommended_actions"),
+                "investigation_stage": analysis_result.get("investigation_stage")
+            }
+            
+            # Save with timestamp in filename for uniqueness
+            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            result_file = os.path.join(analysis_dir, f"{filename_prefix}_{timestamp_str}.json")
             
             with open(result_file, 'w') as f:
-                json.dump(analysis_result, f, indent=2, default=str)
+                json.dump(result_data, f, indent=2, default=str)
             
             print(f"📄 Analysis results saved to: {result_file}")
             
@@ -882,57 +935,6 @@ class MemoryForensicsAgent:
             
         print(f"\n✨ Investigation workflow completed successfully!")
 
-    def _save_single_analysis_result(self, analysis_result: Dict[str, Any], evidence_directory: str, state: ForensicState):
-        """
-        Save analysis result to a JSON file. Works for both single and final combined analysis results.
-        
-        Args:
-            analysis_result: Complete analysis result dictionary
-            evidence_directory: Directory to save the results in
-            state: Current forensic state for context
-        """
-        try:
-            import os
-            import json
-            from datetime import datetime
-            from utils import count_tokens
-            
-            # Create analysis results directory
-            results_dir = os.path.join(evidence_directory, "analysis_results")
-            os.makedirs(results_dir, exist_ok=True)
-            
-            # Determine analysis type based on context
-            total_tokens = count_tokens(state.get('analysis_context', ''))
-            analysis_type = "deeper_analysis" if "deeper" in evidence_directory else "single_analysis"
-            if total_tokens > 25000:
-                analysis_type = "combined_analysis"
-            
-            # Prepare result data with metadata
-            result_data = {
-                "timestamp": datetime.now().isoformat(),
-                "analysis_type": analysis_type,
-                "memory_dump_path": state.get('memory_dump_path', 'Unknown'),
-                "os_hint": state.get('os_hint', 'Unknown'),
-                "user_prompt": state.get('user_prompt', 'General malware analysis'),
-                "analysis_results": analysis_result.get("analysis_results"),
-                "threat_score": analysis_result.get("threat_score"),
-                "analysis_confidence": analysis_result.get("analysis_confidence"),
-                "key_indicators": analysis_result.get("key_indicators"),
-                "recommended_actions": analysis_result.get("recommended_actions"),
-                "investigation_stage": analysis_result.get("investigation_stage")
-            }
-            
-            # Save with timestamp in filename for uniqueness
-            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            result_file = os.path.join(results_dir, f"deeper_analysis_{timestamp_str}.json")
-            
-            with open(result_file, 'w') as f:
-                json.dump(result_data, f, indent=2)
-            
-            print(f"💾 Deeper analysis results saved to: {result_file}")
-            
-        except Exception as e:
-            print(f"⚠️ Error saving deeper analysis result: {e}")
 
 
 # Convenience function for quick investigations

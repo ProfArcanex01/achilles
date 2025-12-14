@@ -5,7 +5,7 @@ This module contains functions for constructing LLM messages and prompts
 used throughout the investigation workflow.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import json
 
 
@@ -110,6 +110,42 @@ Current Status:
 Focus PRIMARILY on command technical correctness. Report any invalid plugins, malformed commands, or OS mismatches."""
 
 
+def extract_commands_from_plan(plan) -> List[str]:
+    """
+    Extract all Volatility commands from an investigation plan.
+    
+    Args:
+        plan: Investigation plan (dict or string)
+        
+    Returns:
+        List of command strings
+    """
+    commands = []
+    
+    # If plan is a string, try to parse it as dict
+    if isinstance(plan, str):
+        try:
+            import json
+            plan = json.loads(plan)
+        except:
+            # If parsing fails, return empty list - can't extract commands
+            return []
+    
+    if not isinstance(plan, dict):
+        return []
+    
+    # Extract from global triage
+    for step in plan.get("global_triage", []):
+        commands.extend(step.get("commands", []))
+    
+    # Extract from investigation phases
+    for phase in plan.get("os_workflows", {}).get("phases", []):
+        for step in phase.get("steps", []):
+            commands.extend(step.get("commands", []))
+    
+    return commands
+
+
 def build_evaluator_user_message(investigation_plan: str, os_hint: str, user_prompt: str) -> str:
     """
     Build user message for the evaluator LLM.
@@ -122,7 +158,12 @@ def build_evaluator_user_message(investigation_plan: str, os_hint: str, user_pro
     Returns:
         User message string
     """
-    return f"""Validate all Volatility 3 commands in this investigation plan:
+    # Extract all commands for complete validation
+    commands = extract_commands_from_plan(investigation_plan)
+    
+    if not commands:
+        # Fallback to truncated plan if command extraction fails
+        return f"""Validate all Volatility 3 commands in this investigation plan:
 
 TARGET OS: {os_hint}
 USER CONTEXT: {user_prompt or "General memory forensics investigation"}
@@ -142,6 +183,41 @@ REPORT:
 - Commands that would fail to execute
 
 Mark success_criteria_met=True ONLY if ALL commands are technically valid and executable."""
+    
+    # Format commands for validation
+    commands_formatted = json.dumps(commands, indent=2)
+    
+    return f"""Validate all Volatility 3 commands in this investigation plan:
+
+TARGET OS: {os_hint}
+USER CONTEXT: {user_prompt or "General memory forensics investigation"}
+
+TOTAL COMMANDS TO VALIDATE: {len(commands)}
+
+COMMANDS:
+{commands_formatted}
+
+CHECK EACH COMMAND FOR:
+1. Correct vol syntax (must start with 'vol -f <path> <plugin>')
+2. Valid plugin names (must exist in Volatility 3 for target OS)
+3. OS compatibility (windows.* for Windows, linux.* for Linux, mac.* for macOS)
+4. Proper parameter usage (no placeholders like <pid> or <path>)
+5. Executable format (can be run by a forensics analyst)
+
+VALIDATION RULES:
+- Windows OS should use: windows.pslist, windows.netscan, windows.malfind, etc.
+- Linux OS should use: linux.pslist, linux.bash, linux.check_afinfo, etc.
+- macOS should use: mac.pslist, mac.mount, mac.bash, etc.
+- Commands must be complete with actual file paths, not placeholders
+
+REPORT:
+- Any invalid or non-existent plugins
+- Commands with incorrect syntax
+- OS mismatches (e.g., windows.pslist on Linux dump)
+- Commands with placeholders or incomplete parameters
+- Commands that would fail to execute
+
+Mark success_criteria_met=True ONLY if ALL {len(commands)} commands are technically valid and executable."""
 
 
 def build_analysis_system_message() -> str:
