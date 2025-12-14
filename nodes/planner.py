@@ -57,6 +57,8 @@ def planner_node(state: ForensicState, llm_with_tools) -> Dict[str, Any]:
         print("✓ Plan generated successfully")
 
         retry_count = state.get("retry_count", 0)
+
+        
         return {
             "messages": [resp], 
             "investigation_plan": plan_text, 
