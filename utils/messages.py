@@ -96,7 +96,7 @@ def build_evaluator_system_message(validation_status: str, plan_summary: str, os
     return f"""You are a Volatility 3 command validation expert. Your primary goal is to verify that all Volatility 3 commands and plugins in the investigation plan are technically valid and executable.
 
 VALIDATION CRITERIA (PRIORITY ORDER):
-1. **Command Syntax**: All vol3 commands use correct syntax: "vol -f <path> <plugin>"
+1. **Command Syntax**: All commands use correct syntax: "vol -f <path> <plugin>"
 2. **Plugin Validity**: All plugins exist in Volatility 3 (e.g., windows.pslist, linux.bash, mac.mount)
 3. **OS Compatibility**: Plugins match the target OS (windows.* for Windows, linux.* for Linux, etc.)
 4. **Command Parameters**: Optional parameters are valid for each plugin
@@ -317,7 +317,7 @@ HARD RULES:
 - Keep 5–10 commands total (including any discovery command).
 - All commands must be copy-paste runnable on a UNIX-like shell (bash/zsh) with standard quoting.
 - Prefer evidence-producing options (e.g., --dump True, -D <output_dir>) and include output directories.
-- The name of the volatility command is vol3 -f <memory_dump_path> <plugin_name>
+- The name of the volatility command is vol -f <memory_dump_path> <plugin_name>
 
 ANALYSIS APPROACH:
 1) Parse initial triage findings and the execution summary to collect concrete identifiers (PIDs, file paths, registry keys).

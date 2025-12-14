@@ -92,9 +92,12 @@ def validate_memory_dump(dump_path: str) -> str:
         
         for os_name, command in os_commands:
             try:
+                # Build safe argv (no shell=True)
+                argv = ["vol", "-f", dump_path, command]
+                
                 result = subprocess.run(
-                    f"vol -f {shlex.quote(dump_path)} {command}",
-                    shell=True,
+                    argv,  # List of arguments
+                    shell=False,  # SAFE: No shell interpretation
                     capture_output=True,
                     text=True,
                     timeout=30  # Shorter timeout per attempt
@@ -122,6 +125,8 @@ def run_volatility_command(command: str) -> str:
     """
     Execute a Volatility 3 command safely with proper error handling.
     
+    Uses safe command execution without shell=True to prevent injection attacks.
+    
     Args:
         command (str): Volatility command to execute (should start with 'vol')
         
@@ -133,10 +138,26 @@ def run_volatility_command(command: str) -> str:
         if not command.strip().startswith('vol'):
             return "Error: Only Volatility commands starting with 'vol' are allowed"
         
-        # Execute the command
+        # Parse command safely to argv
+        try:
+            argv = shlex.split(command)
+        except ValueError as e:
+            return f"Error: Invalid command syntax - {e}"
+        
+        # Validate first argument
+        if argv[0] not in ['vol', 'vol3']:
+            return "Error: Command must start with 'vol' or 'vol3'"
+        
+        # Check for shell metacharacters in arguments
+        dangerous_chars = ['&', '|', ';', '`', '$', '\n', '\r', '>', '<']
+        for arg in argv:
+            if any(char in arg for char in dangerous_chars):
+                return f"Error: Suspicious character in argument: {arg}"
+        
+        # Execute the command safely (no shell)
         result = subprocess.run(
-            command,
-            shell=True,
+            argv,  # List of arguments
+            shell=False,  # SAFE: No shell interpretation
             capture_output=True,
             text=True,
             timeout=300  # 5 minute timeout for longer operations

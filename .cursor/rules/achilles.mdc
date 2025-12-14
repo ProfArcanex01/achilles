@@ -1,0 +1,15 @@
+---
+alwaysApply: true
+---
+
+# Achilles Project Rules
+
+## Documentation
+- All documentation files must be stored in the `Documentations/` folder
+- Keep documentation organized and up-to-date
+
+## Development Standards
+- Use current best practices for 2025
+- Avoid overengineering - keep solutions simple and maintainable
+- Prioritize clarity and readability over complexity 
+

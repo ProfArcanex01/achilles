@@ -58,6 +58,10 @@ class VolatilityExecutor:
         self.shell_path = shell_path
         self.execution_log = []
         
+        # Command deduplication tracking
+        self.executed_commands = {}  # Populated by execution node
+        self.skipped_duplicates = 0  # Count of skipped duplicate commands
+        
         # Create output directory structure
         self.base_output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -86,6 +90,8 @@ class VolatilityExecutor:
         """
         Execute a single Volatility command with enhanced error handling and logging.
         
+        Uses safe command execution (no shell=True) to prevent injection attacks.
+        
         Args:
             command: Volatility command to execute
             context: Additional context (phase, step, heuristics, etc.)
@@ -111,17 +117,28 @@ class VolatilityExecutor:
                 error_message="Command failed security validation"
             )
         
-        # Prepare command
-        sanitized_command = self._sanitize_command(command)
+        # Parse command to argv (safe execution without shell)
+        try:
+            argv = self._parse_command_to_argv(command)
+        except ValueError as e:
+            return CommandResult(
+                command=command,
+                status=ExecutionStatus.FAILED,
+                stdout="",
+                stderr=f"Command parsing failed: {e}",
+                exit_code=-1,
+                execution_time=0,
+                timestamp=timestamp,
+                error_message=f"Failed to parse command: {e}"
+            )
         
         try:
-            print(f"🔧 Executing: {sanitized_command}")
+            print(f"🔧 Executing: {command}")
             
-            # Execute command
+            # Execute command WITHOUT shell (safer)
             result = subprocess.run(
-                sanitized_command,
-                shell=True,
-                executable=self.shell_path,  # None falls back to /bin/sh
+                argv,  # List of arguments, not string
+                shell=False,  # SAFE: No shell interpretation
                 capture_output=True,
                 text=True,
                 timeout=self.timeout
@@ -249,12 +266,38 @@ class VolatilityExecutor:
             # Execute all commands in the step
             step_results = []
             for cmd in step.get("commands", []):
-                result = self.execute_volatility_command(
-                    command=cmd,
-                    context=step_context,
-                    save_output=True,
-                    category=self._get_category_from_phase(phase_name),
-                )
+                # Check if this command was already executed (deduplication)
+                if hasattr(self, 'executed_commands') and cmd in self.executed_commands:
+                    print(f"    ⏭️  Skipping duplicate: {cmd.split()[-1]}")
+                    # Create a CommandResult from cached data
+                    cached = self.executed_commands[cmd]
+                    result = CommandResult(
+                        command=cmd,
+                        status=ExecutionStatus(cached["status"]),
+                        stdout="",  # Don't need to load content
+                        stderr="",
+                        exit_code=0 if cached["status"] == "success" else 1,
+                        execution_time=0.0,
+                        timestamp=datetime.now(),
+                        output_file=cached["output_file"],
+                        error_message=None
+                    )
+                    self.skipped_duplicates += 1
+                else:
+                    result = self.execute_volatility_command(
+                        command=cmd,
+                        context=step_context,
+                        save_output=True,
+                        category=self._get_category_from_phase(phase_name),
+                    )
+                    
+                    # Track this command for future deduplication
+                    if hasattr(self, 'executed_commands'):
+                        self.executed_commands[cmd] = {
+                            "status": result.status.value,
+                            "output_file": result.output_file
+                        }
+                
                 step_results.append(result)
             
             # Apply suspicion heuristics if available
@@ -291,25 +334,72 @@ class VolatilityExecutor:
         return phase_results
 
     def _is_safe_command(self, command: str) -> bool:
-        """Validate command safety."""
+        """
+        Validate command safety with strict rules.
+        
+        Returns True only if command is a valid Volatility command
+        with no shell injection risks.
+        """
         command = command.strip().lower()
         
         # Must start with vol or vol3
         if not (command.startswith('vol ') or command.startswith('vol3 ')):
             return False
         
-        # Blacklist dangerous patterns
+        # Blacklist dangerous shell patterns
         dangerous_patterns = [
             '&&', '||', ';', '|', '`', '$', 
             'rm ', 'del ', 'format', 'fdisk',
-            '>', '>>', 'wget', 'curl', 'nc '
+            '>', '>>', 'wget', 'curl', 'nc ',
+            '\n', '\r'  # No newlines
         ]
         
         return not any(pattern in command for pattern in dangerous_patterns)
 
+    def _parse_command_to_argv(self, command: str) -> List[str]:
+        """
+        Parse command string into safe argv list.
+        
+        Converts "vol -f dump.raw windows.info" to ["vol", "-f", "dump.raw", "windows.info"]
+        
+        Args:
+            command: Command string to parse
+            
+        Returns:
+            List of command arguments (argv)
+            
+        Raises:
+            ValueError: If command format is invalid
+        """
+        import shlex
+        
+        # Use shlex to properly handle quoted arguments
+        try:
+            parts = shlex.split(command)
+        except ValueError as e:
+            raise ValueError(f"Invalid command syntax: {e}")
+        
+        if not parts:
+            raise ValueError("Empty command")
+        
+        # Validate first argument is vol/vol3
+        if parts[0] not in ['vol', 'vol3']:
+            raise ValueError(f"Command must start with 'vol' or 'vol3', got: {parts[0]}")
+        
+        # Validate no suspicious arguments
+        for part in parts:
+            # Check for shell metacharacters in individual args
+            if any(char in part for char in ['&', '|', ';', '`', '$', '\n', '\r']):
+                raise ValueError(f"Suspicious character in argument: {part}")
+        
+        return parts
+
     def _sanitize_command(self, command: str) -> str:
-        """Sanitize and prepare command for execution."""
-        # Basic sanitization - in production, you might want more robust handling
+        """
+        Sanitize command string (deprecated - use _parse_command_to_argv instead).
+        
+        Kept for backwards compatibility but prefer argv parsing.
+        """
         return command.strip()
 
     def _save_command_output(

@@ -3,11 +3,13 @@ OS Detection node for the Memory Forensics Agent.
 
 This module contains the OS detection functionality that runs before planning
 to ensure the correct OS is identified and passed to the planner.
+
+REFACTORED: Now uses the existing validate_memory_dump function from forensics_tools
+to avoid code duplication.
 """
 
 from typing import Dict, Any
-import subprocess
-import shlex
+import re
 from pathlib import Path
 
 from models.state import ForensicState
@@ -18,8 +20,7 @@ def detect_os_node(state: ForensicState) -> Dict[str, Any]:
     Fast OS detection before planning to ensure correct plugin selection.
     
     This node runs before the planner to detect the target OS of the memory dump.
-    It tries different Volatility plugins (windows.info, linux.banner, mac.banner)
-    to determine which OS the dump is from.
+    It uses the existing validate_memory_dump function and extracts OS info.
     
     Args:
         state: Current forensic state containing memory_dump_path
@@ -52,44 +53,18 @@ def detect_os_node(state: ForensicState) -> Dict[str, Any]:
         
         print(f"🔍 Detecting OS type for: {dump_path}")
         
-        # Try to detect OS type using Volatility
-        os_detected = None
+        # Use the existing validate_memory_dump function
+        # Import here to avoid circular dependencies
+        from forensics_tools import validate_memory_dump
         
-        # Test different OS types in order of likelihood
-        os_commands = [
-            ("windows", "windows.info"),
-            ("linux", "linux.banner"), 
-            ("macos", "mac.banner")
-        ]
+        validation_result = validate_memory_dump(dump_path)
         
-        for os_name, command in os_commands:
-            try:
-                print(f"   Testing {os_name}...", end=" ")
-                result = subprocess.run(
-                    f"vol -f {shlex.quote(dump_path)} {command}",
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=30  # 30 second timeout per attempt
-                )
-                
-                if result.returncode == 0 and result.stdout.strip():
-                    os_detected = os_name
-                    print(f"✓")
-                    print(f"✅ Detected OS: {os_detected}")
-                    break  # Found working OS type
-                else:
-                    print(f"✗")
-                    
-            except subprocess.TimeoutExpired:
-                print(f"⏱️ (timeout)")
-                continue  # Try next OS type
-            except Exception as e:
-                print(f"✗ ({str(e)[:30]})")
-                continue
+        # Parse the result to extract OS
+        os_detected = extract_os_from_validation(validation_result)
         
         # Return detected OS or unknown
-        if os_detected:
+        if os_detected and os_detected != "unknown":
+            print(f"✅ Detected OS: {os_detected}")
             return {"os_hint": os_detected}
         else:
             print("⚠️ Could not detect OS automatically - proceeding with 'unknown'")
@@ -100,9 +75,46 @@ def detect_os_node(state: ForensicState) -> Dict[str, Any]:
         return {"os_hint": state.get("os_hint", "unknown")}
 
 
+def extract_os_from_validation(validation_result: str) -> str:
+    """
+    Extract OS type from validate_memory_dump result string.
+    
+    Args:
+        validation_result: String result from validate_memory_dump
+        
+    Returns:
+        OS name ("windows", "linux", "macos") or "unknown"
+    """
+    if not validation_result or not isinstance(validation_result, str):
+        return "unknown"
+    
+    # Look for "OS Type: <os_name>" pattern
+    os_match = re.search(r'OS Type:\s*(\w+)', validation_result, re.IGNORECASE)
+    if os_match:
+        os_name = os_match.group(1).lower()
+        # Normalize "mac" to "macos"
+        if os_name == "mac":
+            os_name = "macos"
+        return os_name
+    
+    # Fallback: Check for OS keywords in the result
+    result_lower = validation_result.lower()
+    if "windows" in result_lower:
+        return "windows"
+    elif "linux" in result_lower:
+        return "linux"
+    elif "mac" in result_lower or "macos" in result_lower:
+        return "macos"
+    
+    return "unknown"
+
+
 def fast_os_detection(dump_path: str) -> str:
     """
     Quick OS detection helper function.
+    
+    This is a convenience function that wraps validate_memory_dump
+    for quick standalone OS detection.
     
     Args:
         dump_path: Path to memory dump
@@ -113,26 +125,9 @@ def fast_os_detection(dump_path: str) -> str:
     if not dump_path or not Path(dump_path).exists():
         return "unknown"
     
-    os_commands = [
-        ("windows", "windows.info"),
-        ("linux", "linux.banner"), 
-        ("macos", "mac.banner")
-    ]
-    
-    for os_name, command in os_commands:
-        try:
-            result = subprocess.run(
-                f"vol -f {shlex.quote(dump_path)} {command}",
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0 and result.stdout.strip():
-                return os_name
-                
-        except:
-            continue
-    
-    return "unknown"
+    try:
+        from forensics_tools import validate_memory_dump
+        result = validate_memory_dump(dump_path)
+        return extract_os_from_validation(result)
+    except Exception:
+        return "unknown"

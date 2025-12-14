@@ -6,6 +6,7 @@ It integrates all the modular components into a cohesive investigation workflow.
 """
 
 import asyncio
+import random
 from typing import Dict, Any, List
 
 from langchain_openai import ChatOpenAI
@@ -277,6 +278,7 @@ class MemoryForensicsAgent:
                                  evidence_directory: str) -> Dict[str, Any]:
         """
         Perform analysis with chunking if context is too large.
+        Uses async parallel processing for chunks to improve performance.
         
         Args:
             analysis_context: Full analysis context string
@@ -290,7 +292,6 @@ class MemoryForensicsAgent:
         """
         try:
             from utils.tokens import count_tokens
-            import time
             
             # Check token count for the full context
             total_tokens = count_tokens(analysis_context)
@@ -299,55 +300,36 @@ class MemoryForensicsAgent:
             if total_tokens <= max_chunk_tokens:
                 # Single analysis - context fits in one request
                 print(f"📊 Performing single analysis ({total_tokens:,} tokens)")
-                return self._analyze_single_chunk(analysis_context, state, execution_status, execution_results, evidence_directory)
+                # For single chunk, use async but run it synchronously
+                return asyncio.run(
+                    self._analyze_single_chunk_async(
+                        analysis_context, state, execution_status, execution_results, evidence_directory
+                    )
+                )
             
-            # Chunked analysis needed
+            # Chunked analysis needed - run async parallel processing
             chunks = self._split_analysis_context(analysis_context, max_chunk_tokens)
             
             # Save chunks to files for resumability and debugging
             chunk_metadata = self._save_chunks_to_files(chunks, evidence_directory, state)
             
-            print(f"📊 Performing chunked analysis:")
+            print(f"📊 Performing parallel chunked analysis:")
             print(f"   - Total context: {total_tokens:,} tokens")
             print(f"   - Number of chunks: {len(chunks)}")
             print(f"   - Max chunk size: {max_chunk_tokens:,} tokens")
+            print(f"   - Concurrency limit: {self.config.chunk_concurrency}")
             print(f"   - Chunks saved to: {chunk_metadata.get('chunks_directory', 'N/A')}")
             
             # Check for existing results from previous runs
             existing_results = self._load_existing_chunk_results(chunk_metadata.get('chunks_directory', ''))
             
-            # Analyze each chunk (skip if already completed)
-            chunk_results = []
-            for i, chunk in enumerate(chunks, 1):
-                chunk_tokens = count_tokens(chunk)
-                chunk_id = f"chunk_{i:03d}"
-                
-                # Check if this chunk was already analyzed
-                if chunk_id in existing_results:
-                    print(f"♻️  Chunk {i}/{len(chunks)} already analyzed - loading existing results...")
-                    chunk_results.append(existing_results[chunk_id])
-                    continue
-                
-                print(f"🔍 Analyzing chunk {i}/{len(chunks)} ({chunk_tokens:,} tokens)...")
-                
-                # Add delay between chunks to prevent rate limit bursts
-                if i > 1:  # Skip delay for first chunk
-                    delay = min(2.0, chunk_tokens / 10000)  # 2s max, scaled by chunk size
-                    print(f"⏳ Waiting {delay:.1f}s to prevent rate limiting...")
-                    time.sleep(delay)
-                
-                chunk_result = self._analyze_single_chunk(
-                    chunk, state, execution_status, execution_results, 
-                    evidence_directory, chunk_info=f"chunk {i} of {len(chunks)}"
+            # Run async parallel chunk analysis
+            chunk_results = asyncio.run(
+                self._analyze_chunks_parallel(
+                    chunks, state, execution_status, execution_results,
+                    evidence_directory, chunk_metadata, existing_results
                 )
-                
-                if chunk_result.get("analysis_results"):
-                    # Save individual chunk result for resumability
-                    self._save_chunk_result(chunk_result, chunk_id, chunk_metadata.get('chunks_directory', ''))
-                    chunk_results.append(chunk_result)
-                    print(f"   ✅ Chunk {i} completed - Threat Score: {chunk_result.get('threat_score', 0):.1f}")
-                else:
-                    print(f"   ⚠️ Chunk {i} failed")
+            )
             
             # Combine results from all chunks
             if chunk_results:
@@ -378,6 +360,87 @@ class MemoryForensicsAgent:
                 "recommended_actions": [f"Analysis error: {str(e)}"]
             }
     
+    async def _analyze_chunks_parallel(
+        self,
+        chunks: List[str],
+        state: ForensicState,
+        execution_status: str,
+        execution_results: Dict[str, Any],
+        evidence_directory: str,
+        chunk_metadata: Dict[str, Any],
+        existing_results: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze multiple chunks in parallel with semaphore-based concurrency control.
+        
+        Args:
+            chunks: List of analysis context chunks
+            state: Current forensic state
+            execution_status: Status of execution
+            execution_results: Results from execution
+            evidence_directory: Path to evidence directory
+            chunk_metadata: Metadata about chunks
+            existing_results: Previously analyzed chunk results
+            
+        Returns:
+            List of analysis results from all chunks
+        """
+        from utils.tokens import count_tokens
+        
+        # Create semaphore for concurrency control
+        semaphore = asyncio.Semaphore(self.config.chunk_concurrency)
+        
+        async def analyze_chunk_with_limit(i: int, chunk: str) -> Dict[str, Any]:
+            """Analyze a single chunk with concurrency limit and jittered delay."""
+            chunk_tokens = count_tokens(chunk)
+            chunk_id = f"chunk_{i:03d}"
+            
+            # Check if this chunk was already analyzed
+            if chunk_id in existing_results:
+                print(f"♻️  Chunk {i}/{len(chunks)} already analyzed - loading existing results...")
+                return existing_results[chunk_id]
+            
+            async with semaphore:
+                # Add jittered delay to prevent rate limit bursts
+                # Jitter range: 0.5s to 1.5s
+                jitter_delay = random.uniform(0.5, 1.5)
+                print(f"🔍 Analyzing chunk {i}/{len(chunks)} ({chunk_tokens:,} tokens) [delay: {jitter_delay:.1f}s]...")
+                await asyncio.sleep(jitter_delay)
+                
+                # Analyze the chunk
+                chunk_result = await self._analyze_single_chunk_async(
+                    chunk, state, execution_status, execution_results,
+                    evidence_directory, chunk_info=f"chunk {i} of {len(chunks)}"
+                )
+                
+                if chunk_result.get("analysis_results"):
+                    # Save individual chunk result for resumability
+                    self._save_chunk_result(chunk_result, chunk_id, chunk_metadata.get('chunks_directory', ''))
+                    print(f"   ✅ Chunk {i} completed - Threat Score: {chunk_result.get('threat_score', 0):.1f}")
+                    return chunk_result
+                else:
+                    print(f"   ⚠️ Chunk {i} failed")
+                    return chunk_result
+        
+        # Create tasks for all chunks
+        tasks = [
+            analyze_chunk_with_limit(i, chunk)
+            for i, chunk in enumerate(chunks, 1)
+        ]
+        
+        # Run all tasks in parallel with graceful error handling
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Filter out exceptions and failed results
+        successful_results = []
+        for i, result in enumerate(results, 1):
+            if isinstance(result, Exception):
+                print(f"   ❌ Chunk {i} raised exception: {result}")
+            elif result and result.get("analysis_results"):
+                successful_results.append(result)
+        
+        return successful_results
+    
     def _split_analysis_context(self, context: str, max_chunk_tokens: int) -> List[str]:
         """Split analysis context into manageable chunks."""
         from utils.tokens import count_tokens
@@ -405,20 +468,39 @@ class MemoryForensicsAgent:
         
         return chunks
     
-    def _analyze_single_chunk(self, analysis_context: str, state: ForensicState, 
-                             execution_status: str, execution_results: Dict[str, Any], 
-                             evidence_directory: str, chunk_info: str = None) -> Dict[str, Any]:
-        """Analyze a single chunk of context with rate limiting."""
+    async def _analyze_single_chunk_async(
+        self,
+        analysis_context: str,
+        state: ForensicState,
+        execution_status: str,
+        execution_results: Dict[str, Any],
+        evidence_directory: str,
+        chunk_info: str = None
+    ) -> Dict[str, Any]:
+        """
+        Async version of _analyze_single_chunk.
+        Analyze a single chunk of context with rate limiting and retry logic.
+        
+        Args:
+            analysis_context: The context chunk to analyze
+            state: Current forensic state
+            execution_status: Status of execution
+            execution_results: Results from execution
+            evidence_directory: Path to evidence directory
+            chunk_info: Optional info about chunk position (e.g., "chunk 2 of 5")
+            
+        Returns:
+            Dict containing analysis results, threat score, indicators, and actions
+        """
         from utils.messages import build_analysis_system_message, build_analysis_user_message
         from langchain_core.messages import SystemMessage, HumanMessage
-        import time
         import re
         
         for attempt in range(self.config.max_retries):
             try:
                 system_message = build_analysis_system_message()
                 user_message = build_analysis_user_message(
-                    state, execution_status, execution_results, evidence_directory, 
+                    state, execution_status, execution_results, evidence_directory,
                     analysis_context, chunk_info
                 )
                 
@@ -427,8 +509,8 @@ class MemoryForensicsAgent:
                     HumanMessage(content=user_message)
                 ]
                 
-                # Use the analyzer LLM to get structured output
-                analysis_result: AnalysisOutput = self.analyzer_llm.invoke(analysis_messages)
+                # Use async invoke for non-blocking LLM call
+                analysis_result: AnalysisOutput = await self.analyzer_llm.ainvoke(analysis_messages)
                 
                 return {
                     "analysis_results": {
@@ -451,18 +533,17 @@ class MemoryForensicsAgent:
                     if wait_match:
                         wait_time = float(wait_match.group(1))
                     else:
-                        # Exponential backoff
-                        wait_time = min(
-                            self.config.rate_limit_delay * (2 ** attempt),
-                            self.config.max_rate_limit_delay
-                        )
+                        # Exponential backoff with jitter
+                        base_wait = self.config.rate_limit_delay * (2 ** attempt)
+                        jitter = random.uniform(0, base_wait * 0.1)  # 10% jitter
+                        wait_time = min(base_wait + jitter, self.config.max_rate_limit_delay)
                     
                     print(f"⏳ Rate limit hit, waiting {wait_time:.1f}s before retry {attempt + 1}/{self.config.max_retries}")
-                    time.sleep(wait_time)
+                    await asyncio.sleep(wait_time)
                     continue
                 else:
                     # Non-rate-limit error
-                    print(f"❌ Analysis error: {e}")
+                    print(f"❌ Analysis error (chunk: {chunk_info}): {e}")
                     return {
                         "analysis_results": {"error": str(e)},
                         "threat_score": 0.0,
@@ -472,7 +553,7 @@ class MemoryForensicsAgent:
                     }
         
         # All retries exhausted
-        print(f"❌ Analysis failed after {self.config.max_retries} attempts due to rate limiting")
+        print(f"❌ Analysis failed after {self.config.max_retries} attempts due to rate limiting (chunk: {chunk_info})")
         return {
             "analysis_results": {"error": f"Rate limit exceeded after {self.config.max_retries} retries"},
             "threat_score": 0.0,

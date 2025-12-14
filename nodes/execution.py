@@ -69,13 +69,18 @@ def execution_node(state: ForensicState) -> Dict[str, Any]:
             "evidence_directory": evidence_dir,
             "global_triage": [],
             "phases": [],
-            "summary": {}
+            "summary": {},
+            "deduplicated_commands": {}  # Track executed commands for deduplication
         }
+        
+        # Track executed commands to avoid duplicates
+        executed_commands = {}  # command -> {"output_file": path, "result": result_dict}
         
         # Execute global triage first
         print("🎯 Executing Global Triage Phase")
         global_triage_success = 0
         global_triage_total = 0
+        global_triage_skipped = 0
         
         if "global_triage" in plan:
             for triage_step in plan["global_triage"]:
@@ -87,6 +92,25 @@ def execution_node(state: ForensicState) -> Dict[str, Any]:
                 
                 for cmd in triage_step.get("commands", []):
                     global_triage_total += 1
+                    
+                    # Check if command already executed
+                    if cmd in executed_commands:
+                        print(f"    ⏭️  Skipping duplicate: {cmd.split()[-1]}")
+                        # Reuse previous result
+                        prev_result = executed_commands[cmd]
+                        step_results.append({
+                            "command": cmd,
+                            "status": prev_result["status"],
+                            "execution_time": 0.0,  # No execution time for duplicates
+                            "output_file": prev_result["output_file"],
+                            "error_message": None,
+                            "note": "Reused from previous execution"
+                        })
+                        global_triage_skipped += 1
+                        if prev_result["status"] == "success":
+                            global_triage_success += 1
+                        continue
+                    
                     result = executor.execute_volatility_command(
                         command=cmd,
                         context=step_context,
@@ -97,19 +121,30 @@ def execution_node(state: ForensicState) -> Dict[str, Any]:
                     if result.status == ExecutionStatus.SUCCESS:
                         global_triage_success += 1
                     
-                    step_results.append({
+                    result_dict = {
                         "command": cmd,
                         "status": result.status.value,
                         "execution_time": result.execution_time,
                         "output_file": result.output_file,
                         "error_message": result.error_message
-                    })
+                    }
+                    
+                    step_results.append(result_dict)
+                    
+                    # Track this command for deduplication
+                    executed_commands[cmd] = {
+                        "status": result.status.value,
+                        "output_file": result.output_file
+                    }
                 
                 execution_results["global_triage"].append({
                     "step_name": step_name,
                     "parse_expectations": triage_step.get("parse_expectations"),
                     "results": step_results
                 })
+        
+        # Pass executed_commands to executor for phase deduplication
+        executor.executed_commands = executed_commands
         
         # Execute main investigation phases
         print("\n🔍 Executing Investigation Phases")
@@ -150,7 +185,9 @@ def execution_node(state: ForensicState) -> Dict[str, Any]:
             "success_rate": successful_commands / total_commands if total_commands > 0 else 0,
             "total_suspicious_hits": total_hits,
             "evidence_directory": evidence_dir,
-            "triage_success_rate": global_triage_success / global_triage_total if global_triage_total > 0 else 0
+            "triage_success_rate": global_triage_success / global_triage_total if global_triage_total > 0 else 0,
+            "deduplicated_commands": global_triage_skipped + executor.skipped_duplicates,
+            "unique_commands_executed": len(executed_commands)
         }
         
         # Save comprehensive summary
@@ -169,6 +206,7 @@ def execution_node(state: ForensicState) -> Dict[str, Any]:
         print(f"\n✅ Investigation Execution Complete!")
         print(f"📊 Overall Success Rate: {success_rate:.1%}")
         print(f"🔍 Suspicious Hits Found: {total_hits}")
+        print(f"♻️  Deduplicated Commands: {global_triage_skipped + executor.skipped_duplicates}")
         print(f"📁 Evidence Directory: {evidence_dir}")
         
         return {

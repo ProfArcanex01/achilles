@@ -19,6 +19,7 @@ class ForensicsConfig:
     max_retries: int = 5
     rate_limit_delay: float = 1.0  # Base delay for rate limiting
     max_rate_limit_delay: float = 60.0  # Maximum delay
+    chunk_concurrency: int = 2  # Max concurrent chunk analyses (2 = safe for most tiers)
     
     # LLM settings
     llm_timeout: int = 120
@@ -51,6 +52,7 @@ class ForensicsConfig:
             max_retries=int(os.getenv('FORENSICS_MAX_RETRIES', 5)),
             rate_limit_delay=float(os.getenv('FORENSICS_RATE_LIMIT_DELAY', 1.0)),
             max_rate_limit_delay=float(os.getenv('FORENSICS_MAX_RATE_LIMIT_DELAY', 60.0)),
+            chunk_concurrency=int(os.getenv('FORENSICS_CHUNK_CONCURRENCY', 2)),
             llm_timeout=int(os.getenv('FORENSICS_LLM_TIMEOUT', 120)),
             llm_temperature=float(os.getenv('FORENSICS_LLM_TEMPERATURE', 0.0)),
             llm_max_tokens=int(os.getenv('FORENSICS_LLM_MAX_TOKENS', 4000)),

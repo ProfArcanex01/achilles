@@ -45,25 +45,32 @@ def validate_plan_quality(plan: Dict[str, Any], skip_command_validation: bool = 
     os_workflows = plan.get("os_workflows", {})
     phases = os_workflows.get("phases", [])
     
-    # Check for essential phase coverage (more flexible matching)
-    required_phase_keywords = [
-        ["process", "execution"],
-        ["network", "connection", "communication"],
-        ["persistence", "autostart", "startup"],
-        ["memory", "artifact", "injection"],
-        ["timeline", "temporal", "chronological"]
+    # Check for essential phase coverage (more flexible - require at least 3 of 5 core phases)
+    core_phase_keywords = [
+        (["process", "execution", "proc"], "Process"),
+        (["network", "connection", "communication", "net"], "Network"),
+        (["persistence", "autostart", "startup", "persist"], "Persistence"),
+        (["memory", "artifact", "injection", "mem"], "Memory"),
+        (["timeline", "temporal", "chronological", "time"], "Timeline")
     ]
     
     phase_names = [phase.get("name", "").lower() for phase in phases]
-    missing_phases = []
+    matched_phases = []
     
-    for i, keyword_group in enumerate(required_phase_keywords):
-        if not any(any(keyword in name for keyword in keyword_group) for name in phase_names):
-            phase_type = ["Process", "Network", "Persistence", "Memory", "Timeline"][i]
-            missing_phases.append(f"{phase_type} analysis (keywords: {keyword_group})")
+    # Check which phase types are present
+    for keywords, phase_type in core_phase_keywords:
+        if any(any(keyword in name for keyword in keywords) for name in phase_names):
+            matched_phases.append(phase_type)
     
-    if missing_phases:
-        errors.append(f"Missing required phases: {missing_phases}")
+    # Require at least 3 out of 5 core phase types (more flexible)
+    min_required_phases = 3
+    if len(matched_phases) < min_required_phases:
+        missing_types = [pt for kw, pt in core_phase_keywords if pt not in matched_phases]
+        errors.append(
+            f"Insufficient phase coverage: Found {len(matched_phases)} core phase types "
+            f"({', '.join(matched_phases)}), minimum {min_required_phases} required. "
+            f"Consider adding: {', '.join(missing_types[:2])}"
+        )
     
     # Validate each phase has sufficient steps (relaxed for minimal prompts)
     for phase in phases:
